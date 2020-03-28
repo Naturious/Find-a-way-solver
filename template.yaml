@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless website for solving puzzle
+
+Parameters:
+  ImgBucketName:
+    Type: String
+    Default: "findawaysolver-imgbucket"
+  CV2LayerPath:
+    Type: String
+    Default: "dependencies/"
+
+# override this with s3://lambda-layers-488738133346/cv2-python37.zip while deploying
+
+Resources:
+
+  ImgBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ImgBucketName
+
+  OpenCVLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: open-cv-layer
+      Description:
+      ContentUri: "s3://lambda-layers-488738133346/cv2-python37.zip"
+      CompatibleRuntimes:
+        - python3.7
+      LicenseInfo: 'MIT'
+      RetentionPolicy: Retain
+
+  SigningFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: signing_lambda/
+      Handler: app.handler
+      Runtime: python3.7
+      Timeout: 3
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref ImgBucketName
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ImgBucket
+
+  PuzzleSolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: puzzle_solver/
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Timeout: 45
+      Layers:
+        - !Ref OpenCVLayer
+
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref ImgBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref ImgBucketName
+      Events:
+        S3PutRawImage:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImgBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "raw/"
+
+Outputs:
+  ImgBucket:
+    Description: S3 Bucket used to hold images of the puzzles, solves and unsolved
+    Value: !Ref ImgBucket
+  SigningFunction:
+    Description: AWS Lambda function that returns signed URL requests to upload to an S3 bucket
+    Value: SigningFunction.Arn
+  PuzzleSolverFunction:
+    Description: AWS Lambda function that triggers off of uploading a file onto the S3 Bucket. It solves the puzzle then uploads the resulting image in a different prefix in the same bucket.
+    Value: PuzzleSolverFunction.Arn
